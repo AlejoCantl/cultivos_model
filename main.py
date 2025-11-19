@@ -49,33 +49,47 @@ def login(credentials: UserLogin, db: Session = Depends(get_db)):
 def predecir(request: PrediccionRequest, db: Session = Depends(get_db)):
     user_id = request.user_id
     
-    # Validar que el usuario existe
+    # Validar usuario
     user = db.query(Usuario).filter(Usuario.id == user_id).first()
     if not user:
         raise HTTPException(404, "Usuario no encontrado")
 
-    # Preparar datos para el modelo (sin user_id)
+    # Preparar datos para los modelos
     data_dict = request.dict()
     data_dict.pop("user_id")
     df = pd.DataFrame([data_dict])
 
-    # Predicciones
-    preds = {
+    # Predicciones en inglés
+    preds_en = {
         "Random Forest": le.inverse_transform(rf.predict(df))[0].title(),
-        "XGBoost": le.inverse_transform(xgb.predict(df))[0].title(),
-        "SVM": le.inverse_transform(svm.predict(df))[0].title(),
+        "XGBoost":       le.inverse_transform(xgb.predict(df))[0].title(),
+        "SVM":           le.inverse_transform(svm.predict(df))[0].title(),
     }
 
-    votos = list(preds.values())
-    ganador, conteo = Counter(votos).most_common(1)[0]
+    # Votación
+    votos = list(preds_en.values())
+    ganador_en, conteo = Counter(votos).most_common(1)[0]
     confianza = round(conteo / 3.0, 2)
     todos_coinciden = confianza == 1.0
 
-# Guardar en BD (AHORA TODO PERFECTO)
+    # === TRADUCCIÓN AL ESPAÑOL ===
+    traduccion_cultivos = {
+        "Rice": "Arroz", "Maize": "Maíz", "Chickpea": "Garbanzo", "Kidneybeans": "Frijol rojo",
+        "Pigeonpeas": "Gandul", "Mothbeans": "Frijol moth", "Mungbean": "Frijol mungo",
+        "Blackgram": "Frijol negro", "Lentil": "Lenteja", "Pomegranate": "Granada",
+        "Banana": "Plátano", "Mango": "Mango", "Grapes": "Uva", "Watermelon": "Sandía",
+        "Muskmelon": "Melón", "Apple": "Manzana", "Orange": "Naranja", "Papaya": "Papaya",
+        "Coconut": "Coco", "Cotton": "Algodón", "Jute": "Yute", "Coffee": "Café"
+    }
+
+    ganador_es = traduccion_cultivos.get(ganador_en, ganador_en)
+    preds_es = {modelo: traduccion_cultivos.get(cultivo, cultivo) for modelo, cultivo in preds_en.items()}
+
+    # Guardar en BD (cultivo final en español)
     respuesta = Respuesta(
         usuario_id=user_id,
         **data_dict,
-        cultivo_final=ganador,
+        cultivo_final=ganador_es,
         confianza=confianza,
         todos_coinciden=todos_coinciden
     )
@@ -83,22 +97,23 @@ def predecir(request: PrediccionRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(respuesta)
 
-    # Guardar solo las predicciones individuales
-    for nombre_modelo, cultivo_individual in preds.items():
+    # Guardar predicciones individuales (en español también, si quieres)
+    for nombre_modelo, cultivo_en in preds_en.items():
         modelo_db = get_or_create_model(db, nombre_modelo)
         pred = Prediccion(
             respuesta_id=respuesta.id,
             modelo_id=modelo_db.id,
-            cultivo_predicho=cultivo_individual,
+            cultivo_predicho=traduccion_cultivos.get(cultivo_en, cultivo_en),  # ← en español
         )
         db.add(pred)
     db.commit()
 
+    # Respuesta al usuario (todo en español)
     return ResultadoFinal(
-        cultivo_recomendado=ganador,
+        cultivo_recomendado=ganador_es,
         confianza=confianza,
         todos_coinciden=todos_coinciden,
-        predicciones=[PrediccionOut(modelo=k, cultivo=v) for k, v in preds.items()],
+        predicciones=[PrediccionOut(modelo=modelo, cultivo=cultivo_es) for modelo, cultivo_es in preds_es.items()],
         fecha=datetime.utcnow()
     )
 
@@ -114,9 +129,9 @@ def historial(user_id: int, db: Session = Depends(get_db)):
             "fecha": r.fecha,
             "input": {"N": r.N, "P": r.P, "K": r.K, "temperature": r.temperature,
                       "humidity": r.humidity, "ph": r.ph, "rainfall": r.rainfall},
-            "cultivo_final": preds[0].cultivo_final if preds else None,
-            "confianza": preds[0].confianza if preds else None,
-            "todos_coinciden": preds[0].todos_coinciden if preds else None,
+            "cultivo_final": r.cultivo_final,
+            "confianza": r.confianza,
+            "todos_coinciden": r.todos_coinciden,
             "predicciones": [{"modelo": p.modelo, "cultivo": p.cultivo_predicho} for p in preds]
         })
     return resultados
