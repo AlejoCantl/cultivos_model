@@ -1,14 +1,16 @@
 from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from schemas import UserRegister, UserLogin, PrediccionRequest, ResultadoFinal, PrediccionOut
 from crud import get_user_by_id_or_username, create_user, get_or_create_model
-from models import Usuario, Respuesta, Prediccion  # Importamos las clases, no __table__
+from models import Usuario, Respuesta, Prediccion
 import joblib
 import pandas as pd
 from collections import Counter
 from datetime import datetime
 from typing import List
+import os
 
 Base.metadata.create_all(bind=engine)
 
@@ -21,12 +23,39 @@ le = joblib.load("modelos/label_encoder_cultivos.pkl")
 
 app = FastAPI(title="🌱 CropAdvisor API - FINAL y FUNCIONANDO")
 
+# ====================== CONFIGURACIÓN DE CORS ======================
+# Configuración para desarrollo y producción
+origins = [
+    "*"  # Permitir todos los orígenes (solo para desarrollo/testing)
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,  # Lista de orígenes permitidos
+    allow_credentials=True,
+    allow_methods=["*"],  # Permitir todos los métodos (GET, POST, etc.)
+    allow_headers=["*"],  # Permitir todos los headers
+)
+
 def get_db():
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
+
+# ====================== ENDPOINT DE SALUD ======================
+@app.get("/")
+def root():
+    return {
+        "message": "🌱 CropAdvisor API está funcionando",
+        "status": "healthy",
+        "version": "1.0.0"
+    }
+
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
 
 # ====================== REGISTRO Y LOGIN ======================
 @app.post("/register", status_code=status.HTTP_201_CREATED)
@@ -61,10 +90,7 @@ def predecir(request: PrediccionRequest, db: Session = Depends(get_db)):
     df = pd.DataFrame([data_dict])
 
     # Escalado para SVM
-    #df_scaled = pd.DataFrame(scaler.transform(df), columns=df.columns)
-
     df_array = df.values
-    # Escalado para SVM (usando el array sin nombres)
     df_scaled = scaler.transform(df_array)
 
     # Predicciones en inglés
@@ -105,13 +131,13 @@ def predecir(request: PrediccionRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(respuesta)
 
-    # Guardar predicciones individuales (en español también, si quieres)
+    # Guardar predicciones individuales (en español también)
     for nombre_modelo, cultivo_en in preds_en.items():
         modelo_db = get_or_create_model(db, nombre_modelo)
         pred = Prediccion(
             respuesta_id=respuesta.id,
             modelo_id=modelo_db.id,
-            cultivo_predicho=traduccion_cultivos.get(cultivo_en, cultivo_en),  # ← en español
+            cultivo_predicho=traduccion_cultivos.get(cultivo_en, cultivo_en),
         )
         db.add(pred)
     db.commit()
@@ -143,3 +169,10 @@ def historial(user_id: int, db: Session = Depends(get_db)):
             "predicciones": [{"modelo": p.modelo, "cultivo": p.cultivo_predicho} for p in preds]
         })
     return resultados
+
+
+# ====================== CONFIGURACIÓN PARA RENDER ======================
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False)
