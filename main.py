@@ -16,6 +16,7 @@ Base.metadata.create_all(bind=engine)
 rf = joblib.load("modelos/random_forest_crop_recommendation.pkl")
 xgb = joblib.load("modelos/xgboost_crop_recommendation.pkl")
 svm = joblib.load("modelos/svm_crop_recommendation.pkl")
+scaler = joblib.load("modelos/scaler_svm.pkl")
 le = joblib.load("modelos/label_encoder_cultivos.pkl")
 
 app = FastAPI(title="🌱 CropAdvisor API - FINAL y FUNCIONANDO")
@@ -59,11 +60,18 @@ def predecir(request: PrediccionRequest, db: Session = Depends(get_db)):
     data_dict.pop("user_id")
     df = pd.DataFrame([data_dict])
 
+    # Escalado para SVM
+    #df_scaled = pd.DataFrame(scaler.transform(df), columns=df.columns)
+
+    df_array = df.values
+    # Escalado para SVM (usando el array sin nombres)
+    df_scaled = scaler.transform(df_array)
+
     # Predicciones en inglés
     preds_en = {
         "Random Forest": le.inverse_transform(rf.predict(df))[0].title(),
         "XGBoost":       le.inverse_transform(xgb.predict(df))[0].title(),
-        "SVM":           le.inverse_transform(svm.predict(df))[0].title(),
+        "SVM":           le.inverse_transform(svm.predict(df_scaled))[0].title(),
     }
 
     # Votación
