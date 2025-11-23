@@ -38,11 +38,16 @@ app.add_middleware(
 )
 
 def get_db():
+    """Generador de sesiones de base de datos con cierre garantizado"""
     db = SessionLocal()
     try:
         yield db
+        db.commit()  # Commit explícito si todo salió bien
+    except Exception:
+        db.rollback()  # Rollback en caso de error
+        raise
     finally:
-        db.close()
+        db.close()  # Siempre cierra la conexión
 
 # ====================== ENDPOINT DE SALUD ======================
 @app.get("/")
