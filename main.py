@@ -57,6 +57,10 @@ def root():
 def health_check():
     return {"status": "ok"}
 
+@app.head("/health")
+def health_check_head():
+    return {"status": "ok"}
+
 # ====================== REGISTRO Y LOGIN ======================
 @app.post("/register", status_code=status.HTTP_201_CREATED)
 def register(user: UserRegister, db: Session = Depends(get_db)):
