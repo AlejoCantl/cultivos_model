@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine, Base
 from schemas import UserRegister, UserLogin, PrediccionRequest, ResultadoFinal, PrediccionOut
 from crud import get_user_by_id_or_username, create_user, get_or_create_model
-from models import Usuario, Respuesta, Prediccion
+from models import Usuario, Respuesta, Prediccion, Modelo
 import joblib
 import pandas as pd
 from collections import Counter
@@ -178,6 +178,75 @@ def historial(user_id: int, db: Session = Depends(get_db)):
             "predicciones": [{"modelo": p.modelo, "cultivo": p.cultivo_predicho} for p in preds]
         })
     return resultados
+
+# ====================== ENVÍO DE CORREO ======================
+from email_utils import generate_history_pdf, send_history_email
+from schemas import EmailRequest
+
+@app.post("/send-history")
+def send_history(request: EmailRequest, db: Session = Depends(get_db)):
+    # 1. Validar usuario
+    user = db.query(Usuario).filter(Usuario.id == request.user_id).first()
+    if not user:
+        raise HTTPException(404, "Usuario no encontrado")
+
+    # 2. Obtener historial
+    query = db.query(Respuesta).filter(Respuesta.usuario_id == request.user_id).order_by(Respuesta.fecha.desc())
+    respuestas = query.all()
+    
+    if not respuestas:
+        raise HTTPException(404, "No hay historial para este usuario")
+
+    history_data = []
+    for r in respuestas:
+        preds_query = db.query(Prediccion).filter(Prediccion.respuesta_id == r.id)
+        
+        # Filtrar por modelo si se especifica
+        if request.model_filter:
+            preds_query = preds_query.join(Modelo).filter(Modelo.nombre == request.model_filter)
+        
+        preds = preds_query.all()
+        
+        # Si hay filtro y esta respuesta no tiene predicción de ese modelo, saltarla
+        if request.model_filter and not preds:
+            continue
+
+        history_data.append({
+            "fecha": r.fecha,
+            "cultivo_final": r.cultivo_final,
+            "confianza": r.confianza,
+            "input": {"N": r.N, "P": r.P, "K": r.K, "temperature": r.temperature,
+                      "humidity": r.humidity, "ph": r.ph, "rainfall": r.rainfall},
+            "predicciones": [{"modelo": p.modelo.nombre, "cultivo": p.cultivo_predicho} for p in preds]
+        })
+
+    if not history_data:
+        mensaje = f"No se encontró historial para el modelo '{request.model_filter}'" if request.model_filter else "No hay historial para este usuario"
+        raise HTTPException(404, mensaje)
+
+    # 3. Generar PDF (con filtro de modelo si aplica)
+    filename = f"historial_{request.user_id}_{request.model_filter or 'completo'}.pdf"
+    try:
+        pdf_path = generate_history_pdf(history_data, filename, model_filter=request.model_filter)
+    except Exception as e:
+        raise HTTPException(500, f"Error generando PDF: {str(e)}")
+
+    # 4. Enviar Correo (con filtro de modelo si aplica)
+    try:
+        user_full_name = f"{user.nombre} {user.apellido}"
+        send_history_email(request.email, pdf_path, user_full_name, model_filter=request.model_filter)
+    except Exception as e:
+        if os.path.exists(pdf_path):
+            os.remove(pdf_path)
+        raise HTTPException(500, f"Error enviando correo: {str(e)}")
+
+    # 5. Limpiar archivo
+    if os.path.exists(pdf_path):
+        os.remove(pdf_path)
+
+    mensaje_respuesta = f"Historial del modelo '{request.model_filter}' enviado a {request.email}" if request.model_filter else f"Historial completo enviado a {request.email}"
+    return {"message": mensaje_respuesta}
+
 
 
 # ====================== CONFIGURACIÓN PARA RENDER ======================

@@ -1,7 +1,7 @@
 # schemas.py
 from pydantic import BaseModel
 from datetime import datetime
-from typing import List
+from typing import List, Optional
 
 class UserRegister(BaseModel):
     username: str
@@ -13,6 +13,11 @@ class UserRegister(BaseModel):
 class UserLogin(BaseModel):
     identificacion_o_username: str
     password: str
+
+class EmailRequest(BaseModel):
+    user_id: int
+    email: str
+    model_filter: Optional[str] = None
 
 class SoilConditions(BaseModel):
     N: float
