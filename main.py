@@ -190,7 +190,7 @@ def send_history(request: EmailRequest, db: Session = Depends(get_db)):
     if not user:
         raise HTTPException(404, "Usuario no encontrado")
 
-    # 2. Obtener historial (reutilizando lógica)
+    # 2. Obtener historial
     query = db.query(Respuesta).filter(Respuesta.usuario_id == request.user_id).order_by(Respuesta.fecha.desc())
     respuestas = query.all()
     
@@ -203,21 +203,11 @@ def send_history(request: EmailRequest, db: Session = Depends(get_db)):
         
         # Filtrar por modelo si se especifica
         if request.model_filter:
-            # Unirse con la tabla Modelo para filtrar por nombre
             preds_query = preds_query.join(Modelo).filter(Modelo.nombre == request.model_filter)
         
         preds = preds_query.all()
         
-        # Si hay filtro y no hay predicciones de ese modelo en esta respuesta, ¿la incluimos?
-        # El requerimiento dice "mandar el historial por un modelo en especifico".
-        # Si filtramos por modelo, solo deberíamos mostrar las predicciones de ese modelo.
-        # Si una respuesta no tiene predicción de ese modelo (raro en este sistema, pero posible), 
-        # o si queremos mostrar solo la parte relevante.
-        # Asumiremos que si se filtra, solo mostramos las predicciones de ese modelo.
-        # Si no quedan predicciones, tal vez no deberíamos incluir la respuesta en el PDF?
-        # O mostramos la respuesta general pero solo las predicciones del modelo?
-        # Vamos a incluir la respuesta si tiene al menos una predicción del modelo solicitado (o si no hay filtro).
-        
+        # Si hay filtro y esta respuesta no tiene predicción de ese modelo, saltarla
         if request.model_filter and not preds:
             continue
 
@@ -231,20 +221,21 @@ def send_history(request: EmailRequest, db: Session = Depends(get_db)):
         })
 
     if not history_data:
-        raise HTTPException(404, f"No se encontró historial para el modelo '{request.model_filter}'")
+        mensaje = f"No se encontró historial para el modelo '{request.model_filter}'" if request.model_filter else "No hay historial para este usuario"
+        raise HTTPException(404, mensaje)
 
-    # 3. Generar PDF
-    filename = f"historial_{request.user_id}.pdf"
+    # 3. Generar PDF (con filtro de modelo si aplica)
+    filename = f"historial_{request.user_id}_{request.model_filter or 'completo'}.pdf"
     try:
-        pdf_path = generate_history_pdf(history_data, filename)
+        pdf_path = generate_history_pdf(history_data, filename, model_filter=request.model_filter)
     except Exception as e:
         raise HTTPException(500, f"Error generando PDF: {str(e)}")
 
-    # 4. Enviar Correo
+    # 4. Enviar Correo (con filtro de modelo si aplica)
     try:
-        send_history_email(request.email, pdf_path)
+        user_full_name = f"{user.nombre} {user.apellido}"
+        send_history_email(request.email, pdf_path, user_full_name, model_filter=request.model_filter)
     except Exception as e:
-        # Limpiar archivo si falla
         if os.path.exists(pdf_path):
             os.remove(pdf_path)
         raise HTTPException(500, f"Error enviando correo: {str(e)}")
@@ -253,7 +244,8 @@ def send_history(request: EmailRequest, db: Session = Depends(get_db)):
     if os.path.exists(pdf_path):
         os.remove(pdf_path)
 
-    return {"message": f"Historial enviado a {request.email}"}
+    mensaje_respuesta = f"Historial del modelo '{request.model_filter}' enviado a {request.email}" if request.model_filter else f"Historial completo enviado a {request.email}"
+    return {"message": mensaje_respuesta}
 
 
 
