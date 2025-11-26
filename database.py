@@ -16,19 +16,23 @@ MYSQL_DB = os.getenv("MYSQL_DB", "recomendacion_cultivo")
 
 DATABASE_URL = f"mysql+mysqlconnector://{MYSQL_USER}:{MYSQL_PASSWORD}@{MYSQL_HOST}:{MYSQL_PORT}/{MYSQL_DB}"
 
-# Configuración optimizada para conexiones limitadas
+# database.py
+
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True,          # Verifica que la conexión esté viva antes de usarla
-    pool_recycle=3600,            # Recicla conexiones cada hora
-    pool_size=3,                  # Reduce a 3 conexiones en el pool
-    max_overflow=0,               # Sin conexiones extras
-    pool_timeout=30,              # Timeout de 30 segundos esperando conexión
-    echo=False,                   # Desactiva logging SQL para mejor performance
+    pool_pre_ping=True, 
+    pool_recycle=3600,
+    # === REDUCCIÓN ADICIONAL PARA CUMPLIR CON EL LÍMITE DE 5 ===
+    pool_size=2,          # ¡Reducir de 3 a 2 conexiones máximas en el pool!
+    max_overflow=0,       # Mantener en 0
+    pool_timeout=15,      # Reducir el timeout a 15s
+    # ==========================================================
+    echo=False,
     connect_args={
-        'connect_timeout': 10,    # Timeout de conexión de 10 segundos
+        'connect_timeout': 10,
         'autocommit': False,
     }
 )
+
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()

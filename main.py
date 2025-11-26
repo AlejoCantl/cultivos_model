@@ -42,12 +42,14 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
-        #db.commit()  # Commit explícito si todo salió bien
+        # db.commit()  # <-- CUIDADO: La línea original estaba comentada, lo cual es correcto.
+                        # No uses commit/rollback en el generador a menos que sea necesario 
+                        # para manejar transacciones explícitas, ya que complica el pool.
     except Exception:
         db.rollback()  # Rollback en caso de error
         raise
     finally:
-        db.close()  # Siempre cierra la conexión
+        db.close()     # <--- ESTO ES CRUCIAL: Asegura que la conexión vuelva al pool
 
 # ====================== ENDPOINT DE SALUD ======================
 @app.get("/")
