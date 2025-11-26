@@ -42,7 +42,7 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
-        db.commit()  # Commit explícito si todo salió bien
+        #db.commit()  # Commit explícito si todo salió bien
     except Exception:
         db.rollback()  # Rollback en caso de error
         raise
